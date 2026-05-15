@@ -17,8 +17,10 @@ from stock_analysis import (
     apply_kdj_filter,
     apply_st_name_filter,
     build_low_valuation_candidates,
+    enrich_advanced_factors,
     enrich_buy_price_signals,
     format_output,
+    enrich_risk_score,
     run_analysis,
     save_reports,
 )
@@ -28,6 +30,7 @@ BASE_DIR = Path(__file__).resolve().parent
 CACHE_DIR = BASE_DIR / ".cache"
 WEB_SNAPSHOT_PATH = CACHE_DIR / "web_market_snapshot.pkl"
 WEB_META_PATH = CACHE_DIR / "web_market_snapshot_meta.json"
+WEB_UI_PREFS_PATH = CACHE_DIR / "web_ui_prefs.json"
 app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
 
 SORT_OPTIONS = {
@@ -35,7 +38,13 @@ SORT_OPTIONS = {
     "PE": "市盈率-动态",
     "PB": "市净率",
     "股息率": "股息率(%)",
+    "行业估值分位": "行业估值分位(%)",
     "风险分数": "风险分数",
+    "估值因子分": "估值因子分",
+    "趋势因子分": "趋势因子分",
+    "质量因子分": "质量因子分",
+    "风险调整分": "风险调整分",
+    "组合总分": "组合总分",
     "K值": "K值",
     "D值": "D值",
     "J值": "J值",
@@ -43,33 +52,79 @@ SORT_OPTIONS = {
     "涨跌幅": "涨跌幅",
     "60日涨跌幅": "60日涨跌幅",
     "建议买入价距离": "建议买入价距离(%)",
+    "止损比例": "止损比例(%)",
+    "盈亏比": "盈亏比",
 }
 SORT_COLUMN_TO_OPTION = {
     column: option for option, column in SORT_OPTIONS.items() if column is not None
 }
 
-DEFAULT_VISIBLE_COLUMNS = [
+AVAILABLE_COLUMNS = [
     "代码",
     "名称",
     "最新价",
+    "涨跌幅",
     "行业",
+    "问题股标签",
+    "策略标签",
+    "组合总分",
+    "建议仓位",
+    "波动预警",
+    "20日波动预警",
+    "60日波动预警",
+    "行业PE分位(%)",
+    "行业PB分位(%)",
+    "行业估值分位(%)",
+    "行业便宜度排名",
+    "行业强度排名",
+    "行业稳健度排名",
     "风险分数",
     "风险等级",
+    "估值因子分",
+    "趋势因子分",
+    "质量因子分",
+    "风险调整分",
     "买入建议状态",
     "建议买入下限",
     "建议买入上限",
+    "建议买入价距离(%)",
+    "追高提示",
+    "止损参考价",
+    "止损比例(%)",
     "目标参考价",
+    "盈亏比",
     "K值",
     "D值",
     "J值",
     "MACD",
-    "涨跌幅",
     "市盈率-动态",
     "市净率",
     "总市值(亿元)",
+    "股息率(%)",
+    "ROE(%)",
+    "营收增长率(%)",
+    "净利润增长率(%)",
+    "资产负债率(%)",
+    "毛利率(%)",
+    "商誉占净资产比(%)",
+    "成交额",
+    "MA20",
+    "MA60",
+    "RSI6",
+    "KDJ金叉",
+    "RSI低位回升",
+    "DIF",
+    "DEA",
+    "MACD翻红",
+    "放量突破",
+    "60日涨跌幅",
+    "年初至今涨跌幅",
+    "流通市值(亿元)",
 ]
 
-PINNED_DISPLAY_COLUMNS = ["代码", "名称", "最新价"]
+DEFAULT_VISIBLE_COLUMNS = AVAILABLE_COLUMNS.copy()
+
+PINNED_DISPLAY_COLUMNS = ["代码", "名称", "最新价", "涨跌幅"]
 
 
 def parse_bool(value: str | None) -> bool:
@@ -127,8 +182,12 @@ def build_config_from_form(form: dict) -> FilterConfig:
         max_drawdown_60=parse_optional_float(form["max_drawdown_60"]),
         require_relative_strength_positive=form["require_relative_strength_positive"],
         buy_style=form["buy_style"],
+        strategy_preset=form["strategy_preset"],
         watch_only=form["watch_only"],
         low_absorption_only=form["low_absorption_only"],
+        exclude_problem_stocks=form["exclude_problem_stocks"],
+        min_turnover_rate=parse_optional_float(form["min_turnover_rate"]),
+        min_amount_yi=parse_optional_float(form["min_amount_yi"]),
     )
 
 
@@ -144,6 +203,23 @@ def save_web_snapshot(market_df: pd.DataFrame, source_name: str) -> None:
             ensure_ascii=False,
             indent=2,
         ),
+        encoding="utf-8",
+    )
+
+
+def load_web_ui_prefs() -> dict:
+    if not WEB_UI_PREFS_PATH.exists():
+        return {}
+    try:
+        return json.loads(WEB_UI_PREFS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def save_web_ui_prefs(prefs: dict) -> None:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    WEB_UI_PREFS_PATH.write_text(
+        json.dumps(prefs, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
@@ -173,7 +249,31 @@ def build_result_from_market_df(
     snapshot_meta: dict | None = None,
     persist_reports: bool = True,
 ) -> dict:
-    working_df = enrich_buy_price_signals(market_df.copy(), style=config.buy_style)
+    working_df = market_df.copy()
+    required_columns = {
+        "风险分数",
+        "风险等级",
+        "问题股标签",
+        "波动预警",
+        "20日波动预警",
+        "60日波动预警",
+        "行业估值分位(%)",
+        "组合总分",
+        "建议仓位",
+        "策略标签",
+        "RSI低位回升",
+        "MACD翻红",
+        "放量突破",
+        "建议买入价距离(%)",
+        "追高提示",
+        "止损比例(%)",
+        "盈亏比",
+    }
+    if not required_columns.issubset(set(working_df.columns)):
+        if "风险分数" not in working_df.columns or "风险等级" not in working_df.columns:
+            working_df = enrich_risk_score(working_df)
+        working_df = enrich_advanced_factors(working_df)
+    working_df = enrich_buy_price_signals(working_df, style=config.buy_style)
     filtered_market_df = apply_category_filters(working_df, config)
     filtered_market_df = apply_indicator_filters(filtered_market_df, config)
     if config.require_kdj_gold_cross:
@@ -296,8 +396,10 @@ def paginate_dataframe(
 
 @app.route("/", methods=["GET", "POST"])
 def index():
+    ui_prefs = load_web_ui_prefs()
     requested_visible_columns = parse_multi_values(request.values.getlist("visible_columns"))
-    visible_columns = requested_visible_columns or DEFAULT_VISIBLE_COLUMNS
+    saved_visible_columns = parse_multi_values(ui_prefs.get("visible_columns"))
+    visible_columns = requested_visible_columns or saved_visible_columns or DEFAULT_VISIBLE_COLUMNS
     form = {
         "action": request.values.get("action", "filter"),
         "max_pe": request.values.get("max_pe", "15"),
@@ -320,8 +422,12 @@ def index():
             request.values.get("require_relative_strength_positive")
         ),
         "buy_style": request.values.get("buy_style", "标准"),
+        "strategy_preset": request.values.get("strategy_preset", "全部"),
         "watch_only": parse_bool(request.values.get("watch_only")),
         "low_absorption_only": parse_bool(request.values.get("low_absorption_only")),
+        "exclude_problem_stocks": parse_bool(request.values.get("exclude_problem_stocks")),
+        "min_turnover_rate": request.values.get("min_turnover_rate", ""),
+        "min_amount_yi": request.values.get("min_amount_yi", ""),
         "active_tab": request.values.get("active_tab", "value"),
         "sort_by": request.values.get("sort_by", "默认"),
         "sort_order": request.values.get("sort_order", "asc"),
@@ -341,22 +447,11 @@ def index():
         "filtered_pagination": None,
         "value_pagination": None,
         "sort_options": list(SORT_OPTIONS.keys()),
+        "strategy_presets": ["全部", "红利策略", "成长策略", "反转策略", "趋势策略"],
         "sort_column_to_option": SORT_COLUMN_TO_OPTION,
         "current_sort_column": SORT_OPTIONS.get(form["sort_by"]),
         "default_visible_columns": DEFAULT_VISIBLE_COLUMNS,
-        "available_columns": DEFAULT_VISIBLE_COLUMNS + [
-            "股息率(%)",
-            "ROE(%)",
-            "MA20",
-            "MA60",
-            "RSI6",
-            "KDJ金叉",
-            "DIF",
-            "DEA",
-            "60日涨跌幅",
-            "年初至今涨跌幅",
-            "流通市值(亿元)",
-        ],
+        "available_columns": AVAILABLE_COLUMNS,
         "error": None,
     }
 
@@ -413,6 +508,7 @@ def index():
     if request.method == "POST":
         config = build_config_from_form(form)
         try:
+            save_web_ui_prefs({"visible_columns": visible_columns})
             if form["action"] == "refresh":
                 result = run_analysis(
                     config=config,

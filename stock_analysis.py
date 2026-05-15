@@ -45,12 +45,33 @@ OUTPUT_COLUMNS = [
     "名称",
     "行业",
     "央国企标签",
+    "问题股标签",
+    "行业PE分位(%)",
+    "行业PB分位(%)",
+    "行业估值分位(%)",
+    "行业便宜度排名",
+    "行业强度排名",
+    "行业稳健度排名",
     "风险分数",
     "风险等级",
+    "波动预警",
+    "20日波动预警",
+    "60日波动预警",
+    "估值因子分",
+    "趋势因子分",
+    "质量因子分",
+    "风险调整分",
+    "组合总分",
+    "建议仓位",
+    "策略标签",
     "建议买入下限",
     "建议买入上限",
+    "建议买入价距离(%)",
+    "追高提示",
     "止损参考价",
+    "止损比例(%)",
     "目标参考价",
+    "盈亏比",
     "买入建议状态",
     "买入风格",
     "股息率(%)",
@@ -60,6 +81,7 @@ OUTPUT_COLUMNS = [
     "资产负债率(%)",
     "毛利率(%)",
     "净利率(%)",
+    "商誉占净资产比(%)",
     "MA5",
     "MA10",
     "MA20",
@@ -97,11 +119,15 @@ OUTPUT_COLUMNS = [
     "D值",
     "J值",
     "KDJ金叉",
+    "RSI低位回升",
     "DIF",
     "DEA",
     "MACD",
+    "MACD翻红",
+    "放量突破",
     "最新价",
     "涨跌幅",
+    "成交额",
     "换手率",
     "市盈率-动态",
     "市净率",
@@ -204,8 +230,12 @@ class FilterConfig:
     max_drawdown_60: float | None = None
     require_relative_strength_positive: bool = False
     buy_style: str = "标准"
+    strategy_preset: str = "全部"
     watch_only: bool = False
     low_absorption_only: bool = False
+    exclude_problem_stocks: bool = False
+    min_turnover_rate: float | None = None
+    min_amount_yi: float | None = None
 
 
 def apply_st_name_filter(df: pd.DataFrame, exclude_st: bool) -> pd.DataFrame:
@@ -311,6 +341,12 @@ def parse_args() -> argparse.Namespace:
         help="建议买入价风格，默认 标准",
     )
     parser.add_argument(
+        "--strategy-preset",
+        default="全部",
+        choices=["全部", "红利策略", "成长策略", "反转策略", "趋势策略"],
+        help="策略预设筛选，默认 全部",
+    )
+    parser.add_argument(
         "--watch-only",
         action="store_true",
         help="仅保留买入建议状态为 可关注 的股票",
@@ -319,6 +355,23 @@ def parse_args() -> argparse.Namespace:
         "--low-absorption-only",
         action="store_true",
         help="仅保留买入建议状态为 进入低吸区 的股票",
+    )
+    parser.add_argument(
+        "--exclude-problem-stocks",
+        action="store_true",
+        help="排除问题股：连续亏损、高负债、低毛利、商誉高、ST、退市风险",
+    )
+    parser.add_argument(
+        "--min-turnover-rate",
+        type=float,
+        default=None,
+        help="最小换手率(%%)，低于该值的股票会被过滤",
+    )
+    parser.add_argument(
+        "--min-amount-yi",
+        type=float,
+        default=None,
+        help="最小成交额(亿元)，低于该值的股票会被过滤",
     )
     return parser.parse_args()
 
@@ -1119,6 +1172,7 @@ def build_empty_fundamental_signal() -> dict[str, float | None]:
         "资产负债率(%)": None,
         "毛利率(%)": None,
         "净利率(%)": None,
+        "商誉占净资产比(%)": None,
     }
 
 
@@ -1187,6 +1241,7 @@ def fetch_fundamental_signal_for_code(code: str) -> dict[str, float | None]:
             "资产负债率(%)": ["资产负债率"],
             "毛利率(%)": ["销售毛利率", "毛利率"],
             "净利率(%)": ["销售净利率", "净利率"],
+            "商誉占净资产比(%)": ["商誉占净资产比", "商誉/净资产", "商誉净资产比"],
         }
         for column_name, keywords in metric_map.items():
             if signal[column_name] is None:
@@ -1203,6 +1258,29 @@ def enrich_fundamental_indicators(df: pd.DataFrame) -> pd.DataFrame:
         if column_name not in enriched.columns:
             enriched[column_name] = default_value
 
+    codes = enriched["代码"].astype(str).tolist()
+
+    def merge_cached_signals(current_df: pd.DataFrame) -> pd.DataFrame:
+        if not cache:
+            return current_df
+        fundamental_df = pd.DataFrame(
+            [{"代码": code, **cache.get(code, build_empty_fundamental_signal())} for code in codes]
+        )
+        merged = current_df.merge(
+            fundamental_df,
+            on="代码",
+            how="left",
+            suffixes=("", "_fund"),
+        )
+        for column_name in build_empty_fundamental_signal():
+            fallback_column = f"{column_name}_fund"
+            if fallback_column in merged.columns:
+                merged[column_name] = merged[column_name].fillna(merged[fallback_column])
+                merged = merged.drop(columns=[fallback_column])
+        return merged
+
+    enriched = merge_cached_signals(enriched)
+
     probe_ok = False
     try:
         probe_df = ak.stock_financial_analysis_indicator_em(symbol="000001")
@@ -1211,29 +1289,24 @@ def enrich_fundamental_indicators(df: pd.DataFrame) -> pd.DataFrame:
         probe_ok = False
 
     if not probe_ok:
-        for column_name, default_value in build_empty_fundamental_signal().items():
-            if column_name not in enriched.columns:
-                enriched[column_name] = default_value
         return enriched
 
-    codes = enriched["代码"].astype(str).tolist()
-    missing_codes = [code for code in codes if code not in cache]
+    missing_codes = []
+    for code in codes:
+        cached_signal = cache.get(code)
+        if cached_signal is None:
+            missing_codes.append(code)
+            continue
+        if all(value is None for value in cached_signal.values()):
+            missing_codes.append(code)
+
     for code in missing_codes:
         cache[code] = fetch_fundamental_signal_for_code(code)
         time.sleep(0.02)
     if missing_codes:
         save_cached_fundamental_lookup(cache)
-
-    fundamental_df = pd.DataFrame(
-        [{"代码": code, **cache.get(code, build_empty_fundamental_signal())} for code in codes]
-    )
-    merged = enriched.merge(fundamental_df, on="代码", how="left", suffixes=("", "_fund"))
-    for column_name in build_empty_fundamental_signal():
-        fallback_column = f"{column_name}_fund"
-        if fallback_column in merged.columns:
-            merged[column_name] = merged[column_name].fillna(merged[fallback_column])
-            merged = merged.drop(columns=[fallback_column])
-    return merged
+        enriched = merge_cached_signals(enriched)
+    return enriched
 
 
 def fetch_bulk_industry_lookup() -> dict[str, str]:
@@ -1432,6 +1505,17 @@ def apply_indicator_filters(df: pd.DataFrame, config: FilterConfig) -> pd.DataFr
         rs_series = pd.to_numeric(filtered["相对沪深300强度20日"], errors="coerce")
         filtered = filtered[rs_series > 0]
 
+    if config.min_turnover_rate is not None:
+        turnover_series = pd.to_numeric(filtered["换手率"], errors="coerce")
+        filtered = filtered[turnover_series >= config.min_turnover_rate]
+
+    if config.min_amount_yi is not None:
+        amount_series = pd.to_numeric(filtered["成交额"], errors="coerce")
+        filtered = filtered[amount_series >= config.min_amount_yi * 1e4]
+
+    if config.exclude_problem_stocks:
+        filtered = filtered[filtered["问题股标签"].fillna("").astype(str) == ""]
+
     if config.watch_only and config.low_absorption_only:
         filtered = filtered[
             filtered["买入建议状态"].isin(["进入低吸区", "可关注"])
@@ -1440,6 +1524,8 @@ def apply_indicator_filters(df: pd.DataFrame, config: FilterConfig) -> pd.DataFr
         filtered = filtered[filtered["买入建议状态"] == "可关注"]
     elif config.low_absorption_only:
         filtered = filtered[filtered["买入建议状态"] == "进入低吸区"]
+
+    filtered = apply_strategy_preset(filtered, config)
 
     return filtered
 
@@ -1509,6 +1595,331 @@ def enrich_risk_score(df: pd.DataFrame) -> pd.DataFrame:
     return enriched
 
 
+def clamp_score(series: pd.Series, low: float, high: float, inverse: bool = False) -> pd.Series:
+    numeric_series = pd.to_numeric(series, errors="coerce")
+    if high == low:
+        score = pd.Series(50.0, index=series.index, dtype="float64")
+    else:
+        score = ((numeric_series - low) / (high - low) * 100).clip(0, 100)
+    if inverse:
+        score = 100 - score
+    return score.fillna(50.0)
+
+
+def build_position_advice(risk_score: float | None, total_score: float | None) -> str:
+    if risk_score is None or pd.isna(risk_score):
+        return "观察"
+    if risk_score >= 75:
+        return "回避"
+    if total_score is None or pd.isna(total_score):
+        return "观察"
+    if risk_score <= 30 and total_score >= 75:
+        return "中仓"
+    if risk_score <= 50 and total_score >= 60:
+        return "轻仓"
+    if risk_score <= 70 and total_score >= 45:
+        return "轻仓试探"
+    return "观察"
+
+
+def build_problem_stock_tags(row: pd.Series) -> str:
+    tags: list[str] = []
+    name_text = str(row.get("名称", "") or "")
+    risk_level = str(row.get("风险等级", "") or "")
+    debt_ratio = normalize_metric_number(row.get("资产负债率(%)"))
+    gross_margin = normalize_metric_number(row.get("毛利率(%)"))
+    profit_growth = normalize_metric_number(row.get("净利润增长率(%)"))
+    revenue_growth = normalize_metric_number(row.get("营收增长率(%)"))
+    goodwill_ratio = normalize_metric_number(row.get("商誉占净资产比(%)"))
+
+    if "ST" in name_text.upper():
+        tags.append("ST")
+    if any(keyword in name_text for keyword in ["退", "退市", "整理"]):
+        tags.append("退市风险")
+    if debt_ratio is not None and debt_ratio >= 75:
+        tags.append("高负债")
+    if gross_margin is not None and gross_margin <= 10:
+        tags.append("低毛利")
+    if goodwill_ratio is not None and goodwill_ratio >= 30:
+        tags.append("商誉高")
+    if (
+        profit_growth is not None
+        and revenue_growth is not None
+        and profit_growth < 0
+        and revenue_growth < 0
+    ):
+        tags.append("连续亏损风险")
+    elif profit_growth is not None and profit_growth < -20:
+        tags.append("连续亏损风险")
+    if risk_level == "极高":
+        tags.append("高风险")
+    return "、".join(tags)
+
+
+def enrich_advanced_factors(df: pd.DataFrame) -> pd.DataFrame:
+    enriched = df.copy()
+    if "行业" not in enriched.columns:
+        enriched["行业"] = ""
+    industry_group = enriched["行业"].fillna("").replace("", "未分类")
+
+    latest_price = pd.to_numeric(enriched.get("最新价"), errors="coerce")
+    ma20 = pd.to_numeric(enriched.get("MA20"), errors="coerce")
+    rsi6 = pd.to_numeric(enriched.get("RSI6"), errors="coerce")
+    rsi12 = pd.to_numeric(enriched.get("RSI12"), errors="coerce")
+    pe_series = pd.to_numeric(enriched.get("市盈率-动态"), errors="coerce").where(
+        lambda series: series > 0
+    )
+    pb_series = pd.to_numeric(enriched.get("市净率"), errors="coerce").where(
+        lambda series: series > 0
+    )
+    macd_series = pd.to_numeric(enriched.get("MACD"), errors="coerce")
+    dif_series = pd.to_numeric(enriched.get("DIF"), errors="coerce")
+    dea_series = pd.to_numeric(enriched.get("DEA"), errors="coerce")
+    volume_series = pd.to_numeric(enriched.get("成交量"), errors="coerce")
+    volume_ma5 = pd.to_numeric(enriched.get("成交量MA5"), errors="coerce")
+    volume_ma10 = pd.to_numeric(enriched.get("成交量MA10"), errors="coerce")
+    daily_change = pd.to_numeric(enriched.get("涨跌幅"), errors="coerce")
+    drawdown_60 = pd.to_numeric(enriched.get("60日最大回撤(%)"), errors="coerce")
+    distance_low_52w = pd.to_numeric(enriched.get("距52周新低(%)"), errors="coerce")
+    risk_score = pd.to_numeric(enriched.get("风险分数"), errors="coerce")
+    dividend_yield = pd.to_numeric(enriched.get("股息率(%)"), errors="coerce")
+    roe_series = pd.to_numeric(enriched.get("ROE(%)"), errors="coerce")
+    revenue_growth = pd.to_numeric(enriched.get("营收增长率(%)"), errors="coerce")
+    profit_growth = pd.to_numeric(enriched.get("净利润增长率(%)"), errors="coerce")
+    debt_ratio = pd.to_numeric(enriched.get("资产负债率(%)"), errors="coerce")
+    gross_margin = pd.to_numeric(enriched.get("毛利率(%)"), errors="coerce")
+    net_margin = pd.to_numeric(enriched.get("净利率(%)"), errors="coerce")
+    goodwill_ratio = pd.to_numeric(enriched.get("商誉占净资产比(%)"), errors="coerce")
+    rs20 = pd.to_numeric(enriched.get("相对沪深300强度20日"), errors="coerce")
+    rs60 = pd.to_numeric(enriched.get("相对沪深300强度60日"), errors="coerce")
+    ret20 = pd.to_numeric(enriched.get("20日涨跌幅"), errors="coerce")
+    vol20 = pd.to_numeric(enriched.get("20日波动率(%)"), errors="coerce")
+    vol60 = pd.to_numeric(enriched.get("60日波动率(%)"), errors="coerce")
+
+    pe_pct = (pe_series.groupby(industry_group).rank(pct=True, ascending=True, method="average") * 100)
+    pb_pct = (pb_series.groupby(industry_group).rank(pct=True, ascending=True, method="average") * 100)
+    valuation_pct = pd.concat([pe_pct, pb_pct], axis=1).mean(axis=1, skipna=True).fillna(50.0)
+    enriched["行业PE分位(%)"] = pe_pct.round(2)
+    enriched["行业PB分位(%)"] = pb_pct.round(2)
+    enriched["行业估值分位(%)"] = valuation_pct.round(2)
+
+    valuation_score = pd.concat(
+        [
+            (100 - pe_pct).fillna(50.0),
+            (100 - pb_pct).fillna(50.0),
+            clamp_score(dividend_yield, 0, 6),
+        ],
+        axis=1,
+    ).mean(axis=1, skipna=True).round(2)
+
+    rsi_rebound_flag = (rsi6 >= 25) & (rsi6 <= 55) & (rsi6 >= rsi12)
+    macd_turn_positive_flag = (macd_series > 0) & (dif_series >= dea_series)
+    volume_breakout_flag = (
+        (volume_series > volume_ma5)
+        & (volume_ma5 >= volume_ma10.fillna(volume_ma5))
+        & (latest_price > ma20)
+        & (daily_change > 0)
+    )
+
+    enriched["RSI低位回升"] = rsi_rebound_flag.map({True: "是", False: "否"})
+    enriched["MACD翻红"] = macd_turn_positive_flag.map({True: "是", False: "否"})
+    enriched["放量突破"] = volume_breakout_flag.map({True: "是", False: "否"})
+
+    trend_score = pd.concat(
+        [
+            clamp_score(rs20, -10, 20),
+            clamp_score(rs60, -15, 30),
+            clamp_score(ret20, -15, 25),
+            macd_turn_positive_flag.astype("float64") * 100,
+            (enriched["均线多头排列"] == "是").astype("float64") * 100,
+            (latest_price > ma20).astype("float64") * 100,
+            (enriched["KDJ金叉"] == "是").astype("float64") * 100,
+            volume_breakout_flag.astype("float64") * 100,
+        ],
+        axis=1,
+    ).mean(axis=1, skipna=True).round(2)
+
+    quality_score = pd.concat(
+        [
+            clamp_score(roe_series, 0, 20),
+            clamp_score(revenue_growth, -10, 30),
+            clamp_score(profit_growth, -10, 30),
+            clamp_score(gross_margin, 10, 50),
+            clamp_score(net_margin, 0, 25),
+            clamp_score(debt_ratio, 20, 80, inverse=True),
+            clamp_score(dividend_yield, 0, 6),
+        ],
+        axis=1,
+    ).mean(axis=1, skipna=True).round(2)
+
+    risk_adjusted_score = (100 - risk_score).clip(0, 100).fillna(50.0).round(2)
+    total_score = (
+        valuation_score * 0.30
+        + trend_score * 0.25
+        + quality_score * 0.25
+        + risk_adjusted_score * 0.20
+    ).round(2)
+
+    enriched["估值因子分"] = valuation_score
+    enriched["趋势因子分"] = trend_score
+    enriched["质量因子分"] = quality_score
+    enriched["风险调整分"] = risk_adjusted_score
+    enriched["组合总分"] = total_score
+    enriched["建议仓位"] = [
+        build_position_advice(risk, total)
+        for risk, total in zip(risk_score.tolist(), total_score.tolist())
+    ]
+
+    cheap_rank = valuation_pct.groupby(industry_group).rank(method="dense", ascending=True)
+    strength_rank = trend_score.groupby(industry_group).rank(method="dense", ascending=False)
+    stability_rank = risk_score.groupby(industry_group).rank(method="dense", ascending=True)
+    enriched["行业便宜度排名"] = cheap_rank.round(0).astype("Int64")
+    enriched["行业强度排名"] = strength_rank.round(0).astype("Int64")
+    enriched["行业稳健度排名"] = stability_rank.round(0).astype("Int64")
+
+    vol20_warn_threshold = vol20.quantile(0.9) if vol20.notna().any() else None
+    vol60_warn_threshold = vol60.quantile(0.9) if vol60.notna().any() else None
+    vol20_warning = (
+        (vol20_warn_threshold is not None)
+        & vol20.notna()
+        & (vol20 >= float(vol20_warn_threshold))
+    )
+    vol60_warning = (
+        (vol60_warn_threshold is not None)
+        & vol60.notna()
+        & (vol60 >= float(vol60_warn_threshold))
+    )
+    enriched["20日波动预警"] = vol20_warning.map({True: "是", False: "否"})
+    enriched["60日波动预警"] = vol60_warning.map({True: "是", False: "否"})
+    enriched["波动预警"] = [
+        "20日+60日异常"
+        if warn20 and warn60
+        else "20日异常"
+        if warn20
+        else "60日异常"
+        if warn60
+        else ""
+        for warn20, warn60 in zip(vol20_warning.tolist(), vol60_warning.tolist())
+    ]
+    enriched["问题股标签"] = enriched.apply(build_problem_stock_tags, axis=1)
+
+    strategy_tags: list[str] = []
+    for idx, row in enriched.iterrows():
+        tags: list[str] = []
+        if (
+            normalize_metric_number(row.get("股息率(%)")) is not None
+            and normalize_metric_number(row.get("股息率(%)")) >= 2.5
+            and normalize_metric_number(row.get("20日波动率(%)")) is not None
+            and normalize_metric_number(row.get("20日波动率(%)")) <= 35
+            and normalize_metric_number(row.get("60日最大回撤(%)")) is not None
+            and normalize_metric_number(row.get("60日最大回撤(%)")) >= -20
+        ):
+            tags.append("红利")
+        if (
+            normalize_metric_number(row.get("营收增长率(%)")) is not None
+            and normalize_metric_number(row.get("营收增长率(%)")) >= 10
+            and normalize_metric_number(row.get("净利润增长率(%)")) is not None
+            and normalize_metric_number(row.get("净利润增长率(%)")) >= 10
+            and normalize_metric_number(row.get("相对沪深300强度20日")) is not None
+            and normalize_metric_number(row.get("相对沪深300强度20日")) > 0
+            and normalize_metric_number(row.get("最新价")) is not None
+            and normalize_metric_number(row.get("MA20")) is not None
+            and normalize_metric_number(row.get("最新价")) > normalize_metric_number(row.get("MA20"))
+        ):
+            tags.append("成长")
+        if row.get("KDJ金叉") == "是" and row.get("RSI低位回升") == "是":
+            low_distance = normalize_metric_number(row.get("距52周新低(%)"))
+            if low_distance is not None and low_distance <= 35:
+                tags.append("反转")
+        if row.get("MACD翻红") == "是" and row.get("均线多头排列") == "是" and row.get("放量突破") == "是":
+            tags.append("趋势")
+        strategy_tags.append("、".join(tags))
+    enriched["策略标签"] = strategy_tags
+    return enriched
+
+
+def apply_strategy_preset(df: pd.DataFrame, config: FilterConfig) -> pd.DataFrame:
+    preset = config.strategy_preset
+    if preset == "全部":
+        return df
+
+    filtered = df.copy()
+    dividend_yield = pd.to_numeric(filtered["股息率(%)"], errors="coerce")
+    volatility_20 = pd.to_numeric(filtered["20日波动率(%)"], errors="coerce")
+    drawdown_60 = pd.to_numeric(filtered["60日最大回撤(%)"], errors="coerce")
+    revenue_growth = pd.to_numeric(filtered["营收增长率(%)"], errors="coerce")
+    profit_growth = pd.to_numeric(filtered["净利润增长率(%)"], errors="coerce")
+    rs20 = pd.to_numeric(filtered["相对沪深300强度20日"], errors="coerce")
+    latest_price = pd.to_numeric(filtered["最新价"], errors="coerce")
+    ma20 = pd.to_numeric(filtered["MA20"], errors="coerce")
+    low_distance = pd.to_numeric(filtered["距52周新低(%)"], errors="coerce")
+    pb_series = pd.to_numeric(filtered["市净率"], errors="coerce")
+    risk_score = pd.to_numeric(filtered["风险分数"], errors="coerce")
+    trend_score = pd.to_numeric(filtered["趋势因子分"], errors="coerce")
+    ret20 = pd.to_numeric(filtered["20日涨跌幅"], errors="coerce")
+    state_owned = filtered["央国企标签"] == "央国企"
+
+    if preset == "红利策略":
+        has_dividend_data = dividend_yield.notna().sum() > 0
+        if has_dividend_data:
+            mask = (
+                ((dividend_yield >= 2.5) | (state_owned & (dividend_yield >= 2.0)))
+                & (volatility_20 <= 35)
+                & (drawdown_60 >= -20)
+            )
+        else:
+            mask = (
+                (volatility_20 <= 30)
+                & (drawdown_60 >= -18)
+                & ((state_owned) | (pb_series <= 1.2) | (risk_score <= 35))
+            )
+        filtered = filtered[mask].copy()
+        if filtered.empty:
+            return filtered
+        filtered["_strategy_priority"] = state_owned.astype("int64")
+        filtered = filtered.sort_values(
+            by=["_strategy_priority", "股息率(%)", "风险分数", "20日波动率(%)"],
+            ascending=[False, False, True, True],
+        ).drop(columns=["_strategy_priority"])
+        return filtered
+
+    if preset == "成长策略":
+        has_growth_data = revenue_growth.notna().sum() > 0 and profit_growth.notna().sum() > 0
+        if has_growth_data:
+            mask = (
+                (revenue_growth >= 10)
+                & (profit_growth >= 10)
+                & (rs20 > 0)
+                & (latest_price > ma20)
+            )
+        else:
+            mask = (
+                (rs20 > 0)
+                & (latest_price > ma20)
+                & ((filtered["均线多头排列"] == "是") | (trend_score >= 60))
+                & (ret20 > 0)
+            )
+        return filtered[mask].copy()
+
+    if preset == "反转策略":
+        mask = (
+            (filtered["KDJ金叉"] == "是")
+            & (filtered["RSI低位回升"] == "是")
+            & (low_distance <= 35)
+        )
+        return filtered[mask].copy()
+
+    if preset == "趋势策略":
+        mask = (
+            (filtered["MACD翻红"] == "是")
+            & (filtered["均线多头排列"] == "是")
+            & (filtered["放量突破"] == "是")
+        )
+        return filtered[mask].copy()
+
+    return filtered
+
+
 def risk_discount_factor(risk_score: float | None) -> float:
     if risk_score is None or pd.isna(risk_score):
         return 0.95
@@ -1566,8 +1977,12 @@ def build_buy_signal_for_row(
     result = {
         "建议买入下限": None,
         "建议买入上限": None,
+        "建议买入价距离(%)": None,
+        "追高提示": "",
         "止损参考价": None,
+        "止损比例(%)": None,
         "目标参考价": None,
+        "盈亏比": None,
         "买入建议状态": "",
         "买入风格": style,
     }
@@ -1598,6 +2013,8 @@ def build_buy_signal_for_row(
         base_upper * risk_discount_factor(risk_score) * profile["upper_multiplier"],
         2,
     )
+    if adjusted_upper <= 0:
+        return result
     atr_value = atr14 if atr14 is not None and atr14 > 0 else max(current_price * 0.03, 0.1)
     max_buy_band = max(
         adjusted_upper * profile["buy_band_ratio"],
@@ -1630,10 +2047,32 @@ def build_buy_signal_for_row(
     else:
         status = "等待回落"
 
+    distance_to_buy_upper = round((current_price / adjusted_upper - 1) * 100, 2)
+    if distance_to_buy_upper >= 15:
+        chase_hint = "严重追高"
+    elif distance_to_buy_upper >= 8:
+        chase_hint = "不宜追高"
+    elif distance_to_buy_upper >= 3:
+        chase_hint = "偏离买点"
+    else:
+        chase_hint = ""
+
+    stop_ratio = round((1 - stop_loss / current_price) * 100, 2)
+    profit_ratio = (target_price - current_price) / current_price if current_price > 0 else None
+    loss_ratio = (current_price - stop_loss) / current_price if current_price > 0 else None
+    if profit_ratio is not None and loss_ratio not in (None, 0):
+        reward_risk_ratio = round(profit_ratio / loss_ratio, 2)
+    else:
+        reward_risk_ratio = None
+
     result["建议买入下限"] = buy_lower
     result["建议买入上限"] = adjusted_upper
+    result["建议买入价距离(%)"] = distance_to_buy_upper
+    result["追高提示"] = chase_hint
     result["止损参考价"] = stop_loss
+    result["止损比例(%)"] = stop_ratio
     result["目标参考价"] = target_price
+    result["盈亏比"] = reward_risk_ratio
     result["买入建议状态"] = status
     return result
 
@@ -1789,6 +2228,7 @@ def run_analysis(config: FilterConfig, output_dir: Path, use_env_proxy: bool) ->
     )
     market_df = enrich_fundamental_indicators(market_df)
     market_df = enrich_risk_score(market_df)
+    market_df = enrich_advanced_factors(market_df)
     market_df = enrich_buy_price_signals(market_df, style=config.buy_style)
     filtered_market_df = apply_category_filters(market_df, config)
     filtered_market_df = apply_indicator_filters(filtered_market_df, config)
@@ -1826,8 +2266,12 @@ def main() -> int:
         require_kdj_gold_cross=args.require_kdj_gold_cross,
         kdj_window=args.kdj_window,
         buy_style=args.buy_style,
+        strategy_preset=args.strategy_preset,
         watch_only=args.watch_only,
         low_absorption_only=args.low_absorption_only,
+        exclude_problem_stocks=args.exclude_problem_stocks,
+        min_turnover_rate=args.min_turnover_rate,
+        min_amount_yi=args.min_amount_yi,
     )
 
     try:

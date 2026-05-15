@@ -184,6 +184,30 @@
         margin: 2px 0 0;
         flex: 0 0 auto;
       }
+      .preset-chips {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin: 8px 0 2px;
+      }
+      .preset-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: rgba(255,255,255,0.78);
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 700;
+        color: #5b473a;
+      }
+      .preset-chip input[type="radio"] {
+        width: 16px;
+        height: 16px;
+        margin: 0;
+      }
       .form-actions {
         display: flex;
         justify-content: flex-end;
@@ -599,6 +623,25 @@
             </summary>
             <div class="filter-body">
               <div>
+                <h3 class="form-section-title">策略预设</h3>
+                <div class="form-hint">一键切到红利、成长、反转、趋势这几种常用策略筛选。</div>
+                <div class="preset-chips">
+                  {% for item in strategy_presets %}
+                  <label class="preset-chip">
+                    <input
+                      type="radio"
+                      name="strategy_preset"
+                      value="{{ item }}"
+                      data-auto-submit="true"
+                      {% if form.strategy_preset == item %}checked{% endif %}
+                    >
+                    <span>{{ item }}</span>
+                  </label>
+                  {% endfor %}
+                </div>
+              </div>
+
+              <div>
                 <h3 class="form-section-title">基础筛选</h3>
                 <div class="form-section">
                   <div class="form-block">
@@ -663,6 +706,14 @@
                     <label for="max_drawdown_60">60日最大回撤不超过(%)</label>
                     <input id="max_drawdown_60" name="max_drawdown_60" value="{{ form.max_drawdown_60 }}" placeholder="如：20">
                   </div>
+                  <div class="form-block">
+                    <label for="min_turnover_rate">最小换手率(%)</label>
+                    <input id="min_turnover_rate" name="min_turnover_rate" value="{{ form.min_turnover_rate }}" placeholder="如：0.5">
+                  </div>
+                  <div class="form-block">
+                    <label for="min_amount_yi">最小成交额(亿元)</label>
+                    <input id="min_amount_yi" name="min_amount_yi" value="{{ form.min_amount_yi }}" placeholder="如：3">
+                  </div>
                 </div>
               </div>
 
@@ -710,6 +761,7 @@
                 <div class="form-hint">切换后默认走本地快速筛选，不重新请求市场数据。</div>
                 <div class="checkboxes">
                   <label><input type="checkbox" name="include_st" data-auto-submit="true" {% if form.include_st %}checked{% endif %}><span>包含 ST</span></label>
+                  <label><input type="checkbox" name="exclude_problem_stocks" data-auto-submit="true" {% if form.exclude_problem_stocks %}checked{% endif %}><span>排除问题股</span></label>
                   <label><input type="checkbox" name="require_kdj_gold_cross" data-auto-submit="true" {% if form.require_kdj_gold_cross %}checked{% endif %}><span>仅保留当日 KDJ 金叉</span></label>
                   <label><input type="checkbox" name="require_above_ma20" data-auto-submit="true" {% if form.require_above_ma20 %}checked{% endif %}><span>仅保留站上 MA20</span></label>
                   <label><input type="checkbox" name="require_bullish_alignment" data-auto-submit="true" {% if form.require_bullish_alignment %}checked{% endif %}><span>仅保留均线多头</span></label>
@@ -858,6 +910,12 @@
                       {% else %}
                       {{ value }}
                       {% endif %}
+                    {% elif key == '追高提示' %}
+                      {% if value %}
+                      <span class="status-pill status-wait">{{ value }}</span>
+                      {% else %}
+                      {{ value }}
+                      {% endif %}
                     {% elif key == '行业' %}
                       <span class="industry-text" title="{{ value }}">{{ value }}</span>
                     {% else %}
@@ -958,6 +1016,12 @@
                       {% else %}
                       {{ value }}
                       {% endif %}
+                    {% elif key == '追高提示' %}
+                      {% if value %}
+                      <span class="status-pill status-wait">{{ value }}</span>
+                      {% else %}
+                      {{ value }}
+                      {% endif %}
                     {% elif key == '行业' %}
                       <span class="industry-text" title="{{ value }}">{{ value }}</span>
                     {% else %}
@@ -1054,6 +1118,12 @@
                       {% elif value == '可关注' %}
                       <span class="status-pill status-watch">{{ value }}</span>
                       {% elif value == '等待回落' %}
+                      <span class="status-pill status-wait">{{ value }}</span>
+                      {% else %}
+                      {{ value }}
+                      {% endif %}
+                    {% elif key == '追高提示' %}
+                      {% if value %}
                       <span class="status-pill status-wait">{{ value }}</span>
                       {% else %}
                       {{ value }}
