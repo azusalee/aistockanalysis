@@ -1,0 +1,1325 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>A 股低估值筛选</title>
+    <style>
+      :root {
+        --bg: #f6f1e8;
+        --paper: #fffaf2;
+        --ink: #202018;
+        --accent: #a43a20;
+        --accent-soft: #e8c9b8;
+        --line: #d8c9b9;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at top left, #f7d8ba 0, transparent 28%),
+          radial-gradient(circle at bottom right, #d6e7d8 0, transparent 24%),
+          var(--bg);
+        color: var(--ink);
+        font-family: "PingFang SC", "Noto Sans SC", sans-serif;
+      }
+      .wrap {
+        max-width: 1320px;
+        margin: 0 auto;
+        padding: 28px 18px 48px;
+        width: 100%;
+        overflow-x: hidden;
+      }
+      .hero {
+        background: linear-gradient(135deg, rgba(164,58,32,.98), rgba(115,32,14,.92));
+        color: #fff7ee;
+        border-radius: 24px;
+        padding: 28px;
+        box-shadow: 0 18px 48px rgba(73, 31, 18, 0.18);
+      }
+      .hero h1 {
+        margin: 0 0 10px;
+        font-size: 34px;
+      }
+      .hero p {
+        margin: 0;
+        opacity: .9;
+      }
+      .panel {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        padding: 20px;
+        margin-top: 18px;
+        box-shadow: 0 10px 28px rgba(76, 50, 33, 0.06);
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
+      }
+      form {
+        display: grid;
+        gap: 18px;
+      }
+      .filter-shell {
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: rgba(255,255,255,0.42);
+        padding: 0 18px 18px;
+      }
+      .filter-shell:not([open]) {
+        padding-bottom: 0;
+      }
+      .filter-shell summary {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 16px 0 14px;
+        cursor: pointer;
+        list-style: none;
+        font-size: 18px;
+        font-weight: 800;
+        color: #4f4034;
+      }
+      .filter-shell summary::-webkit-details-marker {
+        display: none;
+      }
+      .filter-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        color: #7b695c;
+        white-space: nowrap;
+      }
+      .filter-toggle::before {
+        content: "▾";
+        font-size: 14px;
+        transition: transform .18s ease;
+      }
+      .filter-shell:not([open]) .filter-toggle::before {
+        transform: rotate(-90deg);
+      }
+      .filter-body {
+        display: grid;
+        gap: 18px;
+      }
+      .form-section {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        gap: 14px;
+        align-items: end;
+      }
+      .form-section-title {
+        margin: 0 0 10px;
+        font-size: 14px;
+        color: #6a5647;
+        letter-spacing: .04em;
+      }
+      .form-block {
+        min-width: 0;
+      }
+      label {
+        display: block;
+        font-size: 13px;
+        margin-bottom: 6px;
+      }
+      input, select {
+        width: 100%;
+        padding: 11px 12px;
+        border-radius: 12px;
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--ink);
+      }
+      .checkboxes {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 10px 14px;
+        flex-wrap: wrap;
+      }
+      .checkboxes label {
+        margin: 0;
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        min-width: 0;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(255,255,255,0.72);
+        line-height: 1.45;
+      }
+      .checkboxes input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        margin: 2px 0 0;
+        flex: 0 0 auto;
+      }
+      .checkboxes span {
+        display: block;
+        word-break: keep-all;
+      }
+      .column-picks {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        gap: 10px 12px;
+      }
+      .column-picks label {
+        margin: 0;
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        min-width: 0;
+        padding: 9px 11px;
+        border: 1px dashed var(--line);
+        border-radius: 12px;
+        background: rgba(255,255,255,0.56);
+        line-height: 1.4;
+      }
+      .column-picks input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        margin: 2px 0 0;
+        flex: 0 0 auto;
+      }
+      .form-actions {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding-top: 4px;
+      }
+      .form-actions label {
+        margin: 0 auto 0 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(255,255,255,0.72);
+        font-size: 13px;
+      }
+      .form-actions input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        margin: 0;
+      }
+      .form-hint {
+        font-size: 12px;
+        color: #7b695c;
+      }
+      button {
+        appearance: none;
+        border: 0;
+        border-radius: 14px;
+        padding: 13px 22px;
+        background: var(--accent);
+        color: #fff;
+        cursor: pointer;
+        font-weight: 700;
+        box-shadow: 0 10px 24px rgba(164,58,32,.18);
+      }
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .stat {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 14px;
+      }
+      .stat b {
+        display: block;
+        font-size: 22px;
+        margin-top: 6px;
+      }
+      .summary-note {
+        margin-top: 12px;
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: rgba(255,255,255,0.78);
+        border: 1px solid var(--line);
+        color: #6a5647;
+        font-size: 13px;
+      }
+      .stat-path b {
+        font-size: 13px;
+        line-height: 1.5;
+        font-family: "SFMono-Regular", "Menlo", "Monaco", monospace;
+        font-weight: 600;
+        word-break: break-all;
+        white-space: normal;
+        color: #5c4a3d;
+      }
+      .buy-mood {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 12px;
+        margin-top: 14px;
+      }
+      .mood-card {
+        border-radius: 18px;
+        padding: 14px;
+        color: #1f170f;
+        border: 1px solid rgba(32, 32, 24, 0.08);
+      }
+      .mood-card b {
+        display: block;
+        font-size: 24px;
+        margin-top: 6px;
+      }
+      .mood-buy { background: #dff5e8; }
+      .mood-watch { background: #fff0cf; }
+      .mood-wait { background: #f6ddd7; }
+      .status-pill {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-weight: 700;
+        font-size: 12px;
+      }
+      .industry-text {
+        display: inline-block;
+        max-width: 5em;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        vertical-align: bottom;
+      }
+      .status-buy { background: #dff5e8; color: #16623c; }
+      .status-watch { background: #fff0cf; color: #8a5a08; }
+      .status-wait { background: #f6ddd7; color: #8d3021; }
+      .error {
+        margin-top: 12px;
+        padding: 14px;
+        border-radius: 16px;
+        background: #fff0ed;
+        border: 1px solid #f0b1a0;
+        color: #822f1a;
+        white-space: pre-wrap;
+      }
+      .tables {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 0;
+        min-width: 0;
+        max-width: 100%;
+        margin-top: 16px;
+      }
+      .result-tabs {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 6px;
+        padding: 0;
+      }
+      .result-tab {
+        appearance: none;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 10px 16px;
+        background: rgba(255,255,255,0.78);
+        color: #5b473a;
+        cursor: pointer;
+        font-weight: 700;
+        box-shadow: none;
+      }
+      .result-tab.active {
+        background: var(--accent);
+        color: #fff7ee;
+        border-color: var(--accent);
+      }
+      .result-panel[hidden] {
+        display: none;
+      }
+      .result-panel {
+        margin-top: 0;
+      }
+      .table-wrap {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: white;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-gutter: stable both-edges;
+      }
+      .table-scrollbar {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        display: block;
+        height: 18px;
+        margin-bottom: 10px;
+        appearance: none;
+        background: transparent;
+      }
+      .table-scrollbar:disabled {
+        opacity: .45;
+        cursor: not-allowed;
+      }
+      .table-scrollbar::-webkit-slider-runnable-track {
+        height: 8px;
+        border-radius: 999px;
+        background: #eadfd2;
+        border: 1px solid #dac9b8;
+      }
+      .table-scrollbar::-webkit-slider-thumb {
+        appearance: none;
+        width: 68px;
+        height: 16px;
+        margin-top: -5px;
+        border-radius: 999px;
+        background: var(--accent);
+        border: 0;
+        box-shadow: 0 4px 10px rgba(164,58,32,.18);
+        cursor: ew-resize;
+      }
+      .table-scrollbar::-moz-range-track {
+        height: 8px;
+        border-radius: 999px;
+        background: #eadfd2;
+        border: 1px solid #dac9b8;
+      }
+      .table-scrollbar::-moz-range-thumb {
+        width: 68px;
+        height: 16px;
+        border-radius: 999px;
+        background: var(--accent);
+        border: 0;
+        box-shadow: 0 4px 10px rgba(164,58,32,.18);
+        cursor: ew-resize;
+      }
+      table {
+        width: max-content;
+        min-width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      th, td {
+        padding: 10px 12px;
+        border-bottom: 1px solid #efe4d8;
+        text-align: left;
+        white-space: nowrap;
+      }
+      td {
+        background: #fff;
+      }
+      th {
+        position: sticky;
+        top: 0;
+        background: #fffaf2;
+        color: #6f6257;
+        font-weight: 700;
+      }
+      th:not(.sortable-th) {
+        background: #f7efe5;
+        color: #8a7b6e;
+      }
+      .sortable-th {
+        cursor: pointer;
+        user-select: none;
+        background: #fff6ea;
+        color: #4f4034;
+        transition: background-color .15s ease, color .15s ease;
+      }
+      .sortable-th:hover {
+        background: #f6e6d5;
+        color: #a43a20;
+      }
+      .sortable-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .sortable-th .sortable-label::after {
+        content: "⇅";
+        font-size: 11px;
+        color: #c08b73;
+      }
+      .sortable-th:hover .sortable-label::after {
+        color: #a43a20;
+      }
+      .sortable-th.is-sorted .sortable-label::after {
+        content: "";
+      }
+      .sort-indicator {
+        font-size: 11px;
+        color: #a43a20;
+        font-weight: 800;
+      }
+      .sticky-col {
+        position: sticky;
+        left: var(--sticky-left, 0px);
+        z-index: 3;
+      }
+      th.sticky-col {
+        z-index: 6;
+      }
+      td.sticky-col {
+        z-index: 4;
+      }
+      .sticky-code,
+      .sticky-name {
+        box-shadow: 1px 0 0 #eadfd2;
+      }
+      .sticky-name {
+        z-index: 5;
+      }
+      .sticky-divider {
+        box-shadow: 8px 0 12px -10px rgba(113, 79, 53, 0.35);
+      }
+      .section-title {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 12px;
+        min-width: 0;
+        max-width: 100%;
+      }
+      .table-hint {
+        margin-bottom: 10px;
+        font-size: 12px;
+        color: #7b695c;
+        min-width: 0;
+      }
+      .pagination {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-top: 14px;
+        min-width: 0;
+        max-width: 100%;
+      }
+      .pagination-meta {
+        font-size: 12px;
+        color: #7b695c;
+      }
+      .pagination-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .page-button {
+        appearance: none;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 9px 14px;
+        background: #fff;
+        color: var(--ink);
+        cursor: pointer;
+        font-weight: 600;
+        box-shadow: none;
+      }
+      .page-button[disabled] {
+        cursor: not-allowed;
+        opacity: .45;
+      }
+      .inline-tools {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin: 10px 0 0;
+      }
+      .minor-button {
+        appearance: none;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 8px 12px;
+        background: rgba(255,255,255,0.88);
+        color: #5b473a;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 600;
+        box-shadow: none;
+      }
+      .result-toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .result-sort-note {
+        font-size: 13px;
+        color: #7b695c;
+        white-space: nowrap;
+      }
+      .muted { color: #78685b; }
+      @media (max-width: 720px) {
+        .hero h1 { font-size: 28px; }
+        .form-section {
+          grid-template-columns: 1fr;
+        }
+        .checkboxes {
+          grid-template-columns: 1fr;
+        }
+        .form-actions {
+          justify-content: stretch;
+        }
+        .form-actions button {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <section class="hero">
+        <h1>A 股低估值筛选台</h1>
+        <p>支持按行业、银行、地产、央国企筛选，并一键刷新全市场与低估值结果。</p>
+      </section>
+
+      <section class="panel">
+        <form method="post" id="filter-form">
+          <input type="hidden" name="action" id="form-action" value="{{ form.action }}">
+          <input type="hidden" name="active_tab" id="active-tab-input" value="{{ form.active_tab }}">
+          <input type="hidden" name="market_page" id="market-page-input" value="{{ form.market_page }}">
+          <input type="hidden" name="filtered_page" id="filtered-page-input" value="{{ form.filtered_page }}">
+          <input type="hidden" name="value_page" id="value-page-input" value="{{ form.value_page }}">
+          <details class="filter-shell" open>
+            <summary>
+              <span>筛选条件</span>
+              <span class="filter-toggle">展开/收起</span>
+            </summary>
+            <div class="filter-body">
+              <div>
+                <h3 class="form-section-title">基础筛选</h3>
+                <div class="form-section">
+                  <div class="form-block">
+                    <label for="category">分类</label>
+                    <select id="category" name="category">
+                      {% for item in ['全部', '银行', '地产', '央国企'] %}
+                      <option value="{{ item }}" {% if form.category == item %}selected{% endif %}>{{ item }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="form-block">
+                    <label for="industry_keyword">行业关键字</label>
+                    <input id="industry_keyword" name="industry_keyword" value="{{ form.industry_keyword }}" placeholder="如：白酒、半导体、房地产">
+                  </div>
+                  <div class="form-block">
+                    <label for="max_pe">最大 PE</label>
+                    <input id="max_pe" name="max_pe" value="{{ form.max_pe }}">
+                  </div>
+                  <div class="form-block">
+                    <label for="max_pb">最大 PB</label>
+                    <input id="max_pb" name="max_pb" value="{{ form.max_pb }}">
+                  </div>
+                  <div class="form-block">
+                    <label for="min_market_cap_yi">最小总市值(亿元)</label>
+                    <input id="min_market_cap_yi" name="min_market_cap_yi" value="{{ form.min_market_cap_yi }}">
+                  </div>
+                  <div class="form-block">
+                    <label for="top_n">低估值数量</label>
+                    <input id="top_n" name="top_n" value="{{ form.top_n }}">
+                  </div>
+                  <div class="form-block">
+                    <label for="buy_style">买入风格</label>
+                    <select id="buy_style" name="buy_style">
+                      {% for item in ['激进', '标准', '保守'] %}
+                      <option value="{{ item }}" {% if form.buy_style == item %}selected{% endif %}>{{ item }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h3 class="form-section-title">技术筛选</h3>
+                <div class="form-section">
+                  <div class="form-block">
+                    <label for="max_risk_score">最大风险分数</label>
+                    <input id="max_risk_score" name="max_risk_score" value="{{ form.max_risk_score }}" placeholder="如：60">
+                  </div>
+                  <div class="form-block">
+                    <label for="min_rsi6">最小 RSI6</label>
+                    <input id="min_rsi6" name="min_rsi6" value="{{ form.min_rsi6 }}" placeholder="如：30">
+                  </div>
+                  <div class="form-block">
+                    <label for="max_rsi6">最大 RSI6</label>
+                    <input id="max_rsi6" name="max_rsi6" value="{{ form.max_rsi6 }}" placeholder="如：70">
+                  </div>
+                  <div class="form-block">
+                    <label for="max_distance_to_52w_high">距52周新高不超过(%)</label>
+                    <input id="max_distance_to_52w_high" name="max_distance_to_52w_high" value="{{ form.max_distance_to_52w_high }}" placeholder="如：8">
+                  </div>
+                  <div class="form-block">
+                    <label for="max_drawdown_60">60日最大回撤不超过(%)</label>
+                    <input id="max_drawdown_60" name="max_drawdown_60" value="{{ form.max_drawdown_60 }}" placeholder="如：20">
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h3 class="form-section-title">显示与排序</h3>
+                <div class="form-section">
+                  <div class="form-block">
+                    <label for="sort_by">排序字段</label>
+                    <select id="sort_by" name="sort_by">
+                      {% for item in sort_options %}
+                      <option value="{{ item }}" {% if form.sort_by == item %}selected{% endif %}>{{ item }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="form-block">
+                    <label for="sort_order">排序方向</label>
+                    <select id="sort_order" name="sort_order">
+                      <option value="asc" {% if form.sort_order == 'asc' %}selected{% endif %}>升序</option>
+                      <option value="desc" {% if form.sort_order == 'desc' %}selected{% endif %}>降序</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-hint" style="margin: 10px 0 10px;">勾选要显示的列，减少表格宽度。</div>
+                <div class="inline-tools">
+                  <button type="button" class="minor-button" id="reset-columns-button">恢复默认列</button>
+                </div>
+                <div class="column-picks">
+                  {% for column in available_columns %}
+                  <label>
+                    <input
+                      type="checkbox"
+                      name="visible_columns"
+                      value="{{ column }}"
+                      data-auto-submit="true"
+                      {% if column in form.visible_columns %}checked{% endif %}
+                    >
+                    <span>{{ column }}</span>
+                  </label>
+                  {% endfor %}
+                </div>
+              </div>
+
+              <div>
+                <h3 class="form-section-title">快捷开关</h3>
+                <div class="form-hint">切换后默认走本地快速筛选，不重新请求市场数据。</div>
+                <div class="checkboxes">
+                  <label><input type="checkbox" name="include_st" data-auto-submit="true" {% if form.include_st %}checked{% endif %}><span>包含 ST</span></label>
+                  <label><input type="checkbox" name="require_kdj_gold_cross" data-auto-submit="true" {% if form.require_kdj_gold_cross %}checked{% endif %}><span>仅保留当日 KDJ 金叉</span></label>
+                  <label><input type="checkbox" name="require_above_ma20" data-auto-submit="true" {% if form.require_above_ma20 %}checked{% endif %}><span>仅保留站上 MA20</span></label>
+                  <label><input type="checkbox" name="require_bullish_alignment" data-auto-submit="true" {% if form.require_bullish_alignment %}checked{% endif %}><span>仅保留均线多头</span></label>
+                  <label><input type="checkbox" name="require_relative_strength_positive" data-auto-submit="true" {% if form.require_relative_strength_positive %}checked{% endif %}><span>仅保留强于沪深300</span></label>
+                  <label><input type="checkbox" name="watch_only" data-auto-submit="true" {% if form.watch_only %}checked{% endif %}><span>仅显示可关注</span></label>
+                  <label><input type="checkbox" name="low_absorption_only" data-auto-submit="true" {% if form.low_absorption_only %}checked{% endif %}><span>仅显示低吸区</span></label>
+                </div>
+              </div>
+
+            </div>
+          </details>
+          <div class="form-actions">
+            <label><input type="checkbox" name="use_env_proxy" {% if form.use_env_proxy %}checked{% endif %}><span>使用系统代理请求市场数据</span></label>
+            <span class="form-hint">修改数值后点按钮重新请求最新市场数据。</span>
+            <button type="submit" id="submit-button" onclick="document.getElementById('form-action').value='refresh'">刷新市场数据</button>
+          </div>
+        </form>
+
+        {% if summary %}
+        <div class="summary">
+          <div class="stat">数据源<b>{{ summary.source_name }}</b></div>
+          <div class="stat">全市场股票数<b>{{ summary.raw_market_count }}</b></div>
+          <div class="stat">筛选后市场股票数<b>{{ summary.market_count }}</b></div>
+          <div class="stat">低估值候选数<b>{{ summary.value_count }}</b></div>
+          <div class="stat stat-path">全市场文件<b>{{ summary.market_filename }}</b></div>
+          <div class="stat stat-path">筛选结果文件<b>{{ summary.filtered_market_filename }}</b></div>
+        </div>
+        <div class="summary-note">
+          当前模式：{{ summary.data_mode or '未执行筛选' }}
+          {% if summary.refreshed_at %}
+          ，最近市场数据刷新时间：{{ summary.refreshed_at }}
+          {% endif %}
+        </div>
+        <div class="buy-mood">
+          <div class="mood-card mood-buy">进入低吸区<b>{{ summary.buy_status_counts['进入低吸区'] }}</b></div>
+          <div class="mood-card mood-watch">可关注<b>{{ summary.buy_status_counts['可关注'] }}</b></div>
+          <div class="mood-card mood-wait">等待回落<b>{{ summary.buy_status_counts['等待回落'] }}</b></div>
+        </div>
+        {% endif %}
+
+        {% if error %}
+        <div class="error">{{ error }}</div>
+        {% endif %}
+      </section>
+
+      <section class="tables">
+        <div class="result-toolbar">
+          <div class="result-tabs" role="tablist" aria-label="结果列表切换">
+            <button
+              type="button"
+              class="result-tab active"
+              data-result-tab="value"
+              role="tab"
+              aria-selected="true"
+              aria-controls="panel-value"
+            >
+              低估值结果{% if summary %} ({{ summary.value_count }}){% endif %}
+            </button>
+            <button
+              type="button"
+              class="result-tab"
+              data-result-tab="filtered"
+              role="tab"
+              aria-selected="false"
+              aria-controls="panel-filtered"
+            >
+              筛选结果{% if summary %} ({{ summary.market_count }}){% endif %}
+            </button>
+            <button
+              type="button"
+              class="result-tab"
+              data-result-tab="market"
+              role="tab"
+              aria-selected="false"
+              aria-controls="panel-market"
+            >
+              全市场结果{% if summary %} ({{ summary.raw_market_count }}){% endif %}
+            </button>
+          </div>
+          <div class="result-sort-note">
+            当前排序：
+            {% if form.sort_by == '默认' %}
+            默认顺序
+            {% else %}
+            {{ form.sort_by }} · {% if form.sort_order == 'asc' %}升序{% else %}降序{% endif %}
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="panel result-panel" id="panel-value" data-result-panel="value" role="tabpanel">
+          <div class="section-title">
+            <h2>低估值结果</h2>
+            <span class="muted">
+              {% if value_pagination %}
+              第 {{ value_pagination.page }}/{{ value_pagination.total_pages }} 页
+              {% else %}
+              暂无结果
+              {% endif %}
+            </span>
+          </div>
+          <div class="table-hint">表格支持横向滚动，左右滑动可查看更多指标列。</div>
+          <input type="range" min="0" max="0" value="0" class="table-scrollbar" data-scrollbar aria-label="低估值结果横向滚动">
+          <div class="table-wrap" data-table-wrap>
+            <table>
+              <thead>
+                <tr>
+                  {% if value_rows %}
+                    {% for key in value_rows[0].keys() %}
+                    <th
+                      data-col-key="{{ key }}"
+                      {% if key in sort_column_to_option %}
+                      class="sortable-th {% if current_sort_column == key %}is-sorted{% endif %} {% if key == '代码' %}sticky-col sticky-code{% elif key == '名称' %}sticky-col sticky-name sticky-divider{% endif %}"
+                      data-sort-column="{{ key }}"
+                      {% elif key == '代码' %}
+                      class="sticky-col sticky-code"
+                      {% elif key == '名称' %}
+                      class="sticky-col sticky-name sticky-divider"
+                      {% endif %}
+                    >
+                      <span class="sortable-label">
+                        {{ key }}
+                        {% if current_sort_column == key %}
+                        <span class="sort-indicator">{% if form.sort_order == 'asc' %}▲{% else %}▼{% endif %}</span>
+                        {% endif %}
+                      </span>
+                    </th>
+                    {% endfor %}
+                  {% endif %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in value_rows %}
+                <tr>
+                  {% for key, value in row.items() %}
+                  <td
+                    data-col-key="{{ key }}"
+                    class="{% if key == '代码' %}sticky-col sticky-code{% elif key == '名称' %}sticky-col sticky-name sticky-divider{% endif %}"
+                  >
+                    {% if key == '买入建议状态' %}
+                      {% if value == '进入低吸区' %}
+                      <span class="status-pill status-buy">{{ value }}</span>
+                      {% elif value == '可关注' %}
+                      <span class="status-pill status-watch">{{ value }}</span>
+                      {% elif value == '等待回落' %}
+                      <span class="status-pill status-wait">{{ value }}</span>
+                      {% else %}
+                      {{ value }}
+                      {% endif %}
+                    {% elif key == '行业' %}
+                      <span class="industry-text" title="{{ value }}">{{ value }}</span>
+                    {% else %}
+                      {{ value }}
+                    {% endif %}
+                  </td>
+                  {% endfor %}
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% if value_pagination %}
+          <div class="pagination">
+            <div class="pagination-meta">
+              共 {{ value_pagination.total_rows }} 条，当前显示 {{ value_pagination.start_row }}-{{ value_pagination.end_row }} 条
+            </div>
+            <div class="pagination-actions">
+              <button
+                type="button"
+                class="page-button"
+                data-page-target="value"
+                data-page="{{ value_pagination.page - 1 }}"
+                {% if not value_pagination.has_prev %}disabled{% endif %}
+              >
+                上一页
+              </button>
+              <button
+                type="button"
+                class="page-button"
+                data-page-target="value"
+                data-page="{{ value_pagination.page + 1 }}"
+                {% if not value_pagination.has_next %}disabled{% endif %}
+              >
+                下一页
+              </button>
+            </div>
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="panel result-panel" id="panel-filtered" data-result-panel="filtered" role="tabpanel" hidden>
+          <div class="section-title">
+            <h2>筛选结果</h2>
+            <span class="muted">
+              {% if filtered_pagination %}
+              第 {{ filtered_pagination.page }}/{{ filtered_pagination.total_pages }} 页
+              {% else %}
+              暂无结果
+              {% endif %}
+            </span>
+          </div>
+          <div class="table-hint">这是按当前筛选条件保留下来的结果列表，支持横向滚动查看完整指标。</div>
+          <input type="range" min="0" max="0" value="0" class="table-scrollbar" data-scrollbar aria-label="筛选结果横向滚动">
+          <div class="table-wrap" data-table-wrap>
+            <table>
+              <thead>
+                <tr>
+                  {% if filtered_rows %}
+                    {% for key in filtered_rows[0].keys() %}
+                    <th
+                      data-col-key="{{ key }}"
+                      {% if key in sort_column_to_option %}
+                      class="sortable-th {% if current_sort_column == key %}is-sorted{% endif %} {% if key == '代码' %}sticky-col sticky-code{% elif key == '名称' %}sticky-col sticky-name sticky-divider{% endif %}"
+                      data-sort-column="{{ key }}"
+                      {% elif key == '代码' %}
+                      class="sticky-col sticky-code"
+                      {% elif key == '名称' %}
+                      class="sticky-col sticky-name sticky-divider"
+                      {% endif %}
+                    >
+                      <span class="sortable-label">
+                        {{ key }}
+                        {% if current_sort_column == key %}
+                        <span class="sort-indicator">{% if form.sort_order == 'asc' %}▲{% else %}▼{% endif %}</span>
+                        {% endif %}
+                      </span>
+                    </th>
+                    {% endfor %}
+                  {% endif %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in filtered_rows %}
+                <tr>
+                  {% for key, value in row.items() %}
+                  <td
+                    data-col-key="{{ key }}"
+                    class="{% if key == '代码' %}sticky-col sticky-code{% elif key == '名称' %}sticky-col sticky-name sticky-divider{% endif %}"
+                  >
+                    {% if key == '买入建议状态' %}
+                      {% if value == '进入低吸区' %}
+                      <span class="status-pill status-buy">{{ value }}</span>
+                      {% elif value == '可关注' %}
+                      <span class="status-pill status-watch">{{ value }}</span>
+                      {% elif value == '等待回落' %}
+                      <span class="status-pill status-wait">{{ value }}</span>
+                      {% else %}
+                      {{ value }}
+                      {% endif %}
+                    {% elif key == '行业' %}
+                      <span class="industry-text" title="{{ value }}">{{ value }}</span>
+                    {% else %}
+                      {{ value }}
+                    {% endif %}
+                  </td>
+                  {% endfor %}
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% if filtered_pagination %}
+          <div class="pagination">
+            <div class="pagination-meta">
+              共 {{ filtered_pagination.total_rows }} 条，当前显示 {{ filtered_pagination.start_row }}-{{ filtered_pagination.end_row }} 条
+            </div>
+            <div class="pagination-actions">
+              <button
+                type="button"
+                class="page-button"
+                data-page-target="filtered"
+                data-page="{{ filtered_pagination.page - 1 }}"
+                {% if not filtered_pagination.has_prev %}disabled{% endif %}
+              >
+                上一页
+              </button>
+              <button
+                type="button"
+                class="page-button"
+                data-page-target="filtered"
+                data-page="{{ filtered_pagination.page + 1 }}"
+                {% if not filtered_pagination.has_next %}disabled{% endif %}
+              >
+                下一页
+              </button>
+            </div>
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="panel result-panel" id="panel-market" data-result-panel="market" role="tabpanel" hidden>
+          <div class="section-title">
+            <h2>全市场结果</h2>
+            <span class="muted">
+              {% if market_pagination %}
+              第 {{ market_pagination.page }}/{{ market_pagination.total_pages }} 页
+              {% else %}
+              暂无结果
+              {% endif %}
+            </span>
+          </div>
+          <div class="table-hint">表格支持横向滚动，左右滑动可查看更多指标列。</div>
+          <input type="range" min="0" max="0" value="0" class="table-scrollbar" data-scrollbar aria-label="全市场结果横向滚动">
+          <div class="table-wrap" data-table-wrap>
+            <table>
+              <thead>
+                <tr>
+                  {% if market_rows %}
+                    {% for key in market_rows[0].keys() %}
+                    <th
+                      data-col-key="{{ key }}"
+                      {% if key in sort_column_to_option %}
+                      class="sortable-th {% if current_sort_column == key %}is-sorted{% endif %} {% if key == '代码' %}sticky-col sticky-code{% elif key == '名称' %}sticky-col sticky-name sticky-divider{% endif %}"
+                      data-sort-column="{{ key }}"
+                      {% elif key == '代码' %}
+                      class="sticky-col sticky-code"
+                      {% elif key == '名称' %}
+                      class="sticky-col sticky-name sticky-divider"
+                      {% endif %}
+                    >
+                      <span class="sortable-label">
+                        {{ key }}
+                        {% if current_sort_column == key %}
+                        <span class="sort-indicator">{% if form.sort_order == 'asc' %}▲{% else %}▼{% endif %}</span>
+                        {% endif %}
+                      </span>
+                    </th>
+                    {% endfor %}
+                  {% endif %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in market_rows %}
+                <tr>
+                  {% for key, value in row.items() %}
+                  <td
+                    data-col-key="{{ key }}"
+                    class="{% if key == '代码' %}sticky-col sticky-code{% elif key == '名称' %}sticky-col sticky-name sticky-divider{% endif %}"
+                  >
+                    {% if key == '买入建议状态' %}
+                      {% if value == '进入低吸区' %}
+                      <span class="status-pill status-buy">{{ value }}</span>
+                      {% elif value == '可关注' %}
+                      <span class="status-pill status-watch">{{ value }}</span>
+                      {% elif value == '等待回落' %}
+                      <span class="status-pill status-wait">{{ value }}</span>
+                      {% else %}
+                      {{ value }}
+                      {% endif %}
+                    {% elif key == '行业' %}
+                      <span class="industry-text" title="{{ value }}">{{ value }}</span>
+                    {% else %}
+                      {{ value }}
+                    {% endif %}
+                  </td>
+                  {% endfor %}
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% if market_pagination %}
+          <div class="pagination">
+            <div class="pagination-meta">
+              共 {{ market_pagination.total_rows }} 条，当前显示 {{ market_pagination.start_row }}-{{ market_pagination.end_row }} 条
+            </div>
+            <div class="pagination-actions">
+              <button
+                type="button"
+                class="page-button"
+                data-page-target="market"
+                data-page="{{ market_pagination.page - 1 }}"
+                {% if not market_pagination.has_prev %}disabled{% endif %}
+              >
+                上一页
+              </button>
+              <button
+                type="button"
+                class="page-button"
+                data-page-target="market"
+                data-page="{{ market_pagination.page + 1 }}"
+                {% if not market_pagination.has_next %}disabled{% endif %}
+              >
+                下一页
+              </button>
+            </div>
+          </div>
+          {% endif %}
+        </div>
+      </section>
+    </div>
+    <script>
+      (() => {
+        const form = document.getElementById("filter-form");
+        const submitButton = document.getElementById("submit-button");
+        const resetColumnsButton = document.getElementById("reset-columns-button");
+        const actionInput = document.getElementById("form-action");
+        const activeTabInput = document.getElementById("active-tab-input");
+        const sortByInput = document.getElementById("sort_by");
+        const sortOrderInput = document.getElementById("sort_order");
+        const marketPageInput = document.getElementById("market-page-input");
+        const filteredPageInput = document.getElementById("filtered-page-input");
+        const valuePageInput = document.getElementById("value-page-input");
+        if (!form) return;
+
+        let isSubmitting = false;
+        const submitForm = (mode, options = {}) => {
+          if (isSubmitting) return;
+          isSubmitting = true;
+          const marketPage = options.marketPage ?? "1";
+          const filteredPage = options.filteredPage ?? "1";
+          const valuePage = options.valuePage ?? "1";
+          if (actionInput) {
+            actionInput.value = mode;
+          }
+          if (activeTabInput) {
+            activeTabInput.value = options.activeTab ?? activeTabInput.value ?? "value";
+          }
+          if (marketPageInput) {
+            marketPageInput.value = String(marketPage);
+          }
+          if (filteredPageInput) {
+            filteredPageInput.value = String(filteredPage);
+          }
+          if (valuePageInput) {
+            valuePageInput.value = String(valuePage);
+          }
+          if (submitButton) {
+            submitButton.textContent = mode === "refresh" ? "刷新中..." : "本地筛选中...";
+            submitButton.disabled = true;
+          }
+          form.requestSubmit();
+        };
+
+        form.querySelectorAll("[data-auto-submit='true']").forEach((input) => {
+          input.addEventListener("change", () => {
+            window.setTimeout(() => submitForm("filter"), 80);
+          });
+        });
+
+        form.querySelectorAll("select, input:not([type='checkbox']):not([type='hidden'])").forEach((input) => {
+          input.addEventListener("change", () => {
+            if (input.id === "submit-button") return;
+            window.setTimeout(() => submitForm("filter"), 80);
+          });
+        });
+
+        document.querySelectorAll("[data-page-target]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const target = button.dataset.pageTarget;
+            const nextPage = button.dataset.page || "1";
+            submitForm("filter", {
+              activeTab: target,
+              marketPage: target === "market" ? nextPage : (marketPageInput?.value || "1"),
+              filteredPage: target === "filtered" ? nextPage : (filteredPageInput?.value || "1"),
+              valuePage: target === "value" ? nextPage : (valuePageInput?.value || "1"),
+            });
+          });
+        });
+
+        const switchResultTab = (target) => {
+          if (activeTabInput) {
+            activeTabInput.value = target;
+          }
+          document.querySelectorAll("[data-result-tab]").forEach((button) => {
+            const isActive = button.dataset.resultTab === target;
+            button.classList.toggle("active", isActive);
+            button.setAttribute("aria-selected", isActive ? "true" : "false");
+          });
+
+          document.querySelectorAll("[data-result-panel]").forEach((panel) => {
+            panel.hidden = panel.dataset.resultPanel !== target;
+          });
+        };
+
+        document.querySelectorAll("[data-result-tab]").forEach((button) => {
+          button.addEventListener("click", () => {
+            switchResultTab(button.dataset.resultTab || "value");
+          });
+        });
+
+        if (resetColumnsButton) {
+          resetColumnsButton.addEventListener("click", () => {
+            const defaultColumns = new Set([
+              {% for column in default_visible_columns %}
+              "{{ column }}",
+              {% endfor %}
+            ]);
+            form.querySelectorAll("input[name='visible_columns']").forEach((input) => {
+              input.checked = defaultColumns.has(input.value);
+            });
+            window.setTimeout(() => submitForm("filter"), 50);
+          });
+        }
+
+        const sortColumnToOption = {
+          {% for column, option in sort_column_to_option.items() %}
+          "{{ column }}": "{{ option }}",
+          {% endfor %}
+        };
+
+        document.querySelectorAll("[data-sort-column]").forEach((header) => {
+          header.addEventListener("click", () => {
+            const column = header.dataset.sortColumn;
+            const targetSortOption = sortColumnToOption[column];
+            if (!targetSortOption || !sortByInput || !sortOrderInput) return;
+
+            if (sortByInput.value === targetSortOption) {
+              sortOrderInput.value = sortOrderInput.value === "asc" ? "desc" : "asc";
+            } else {
+              sortByInput.value = targetSortOption;
+              sortOrderInput.value = "asc";
+            }
+
+            window.setTimeout(() => submitForm("filter", {
+              activeTab: activeTabInput?.value || "value",
+            }), 50);
+          });
+        });
+
+        const syncScrollPair = (scrollbar, tableWrap) => {
+          let syncing = false;
+          const applyScrollLeft = (value, target) => {
+            if (syncing) return;
+            syncing = true;
+            target.scrollLeft = value;
+            window.requestAnimationFrame(() => {
+              syncing = false;
+            });
+          };
+
+          scrollbar.addEventListener("input", () => {
+            applyScrollLeft(Number(scrollbar.value || 0), tableWrap);
+          });
+          tableWrap.addEventListener("scroll", () => {
+            if (syncing) return;
+            syncing = true;
+            scrollbar.value = String(Math.round(tableWrap.scrollLeft));
+            window.requestAnimationFrame(() => {
+              syncing = false;
+            });
+          });
+        };
+
+        const setupTableScrollbar = (tableWrap, scrollbar) => {
+          const updateScrollbar = () => {
+            const table = tableWrap.querySelector("table");
+            const contentWidth = table ? table.scrollWidth : tableWrap.clientWidth;
+            const visibleWidth = tableWrap.clientWidth;
+            const maxScroll = Math.max(contentWidth - visibleWidth, 0);
+            scrollbar.max = String(maxScroll);
+            scrollbar.value = String(Math.min(Math.round(tableWrap.scrollLeft), maxScroll));
+            scrollbar.disabled = maxScroll <= 0;
+          };
+
+          syncScrollPair(scrollbar, tableWrap);
+          updateScrollbar();
+
+          if (window.ResizeObserver) {
+            const observer = new ResizeObserver(() => updateScrollbar());
+            observer.observe(tableWrap);
+            const table = tableWrap.querySelector("table");
+            if (table) {
+              observer.observe(table);
+            }
+          } else {
+            window.addEventListener("resize", updateScrollbar);
+          }
+        };
+
+        const updateStickyColumns = (tableWrap) => {
+          const codeHeader = tableWrap.querySelector("th[data-col-key='代码']");
+          const nameHeader = tableWrap.querySelector("th[data-col-key='名称']");
+          if (!codeHeader || !nameHeader) return;
+
+          const codeWidth = codeHeader.getBoundingClientRect().width;
+          tableWrap.querySelectorAll("[data-col-key='代码']").forEach((cell) => {
+            cell.style.setProperty("--sticky-left", "0px");
+          });
+          tableWrap.querySelectorAll("[data-col-key='名称']").forEach((cell) => {
+            cell.style.setProperty("--sticky-left", `${codeWidth}px`);
+          });
+        };
+
+        document.querySelectorAll("[data-table-wrap]").forEach((tableWrap) => {
+          const panel = tableWrap.parentElement;
+          const scrollbar = panel?.querySelector("[data-scrollbar]");
+          if (!scrollbar) return;
+          setupTableScrollbar(tableWrap, scrollbar);
+          updateStickyColumns(tableWrap);
+
+          if (window.ResizeObserver) {
+            const stickyObserver = new ResizeObserver(() => updateStickyColumns(tableWrap));
+            const table = tableWrap.querySelector("table");
+            if (table) {
+              stickyObserver.observe(table);
+            }
+            stickyObserver.observe(tableWrap);
+          } else {
+            window.addEventListener("resize", () => updateStickyColumns(tableWrap));
+          }
+        });
+
+        switchResultTab(activeTabInput?.value || "value");
+
+        form.addEventListener("submit", () => {
+          if (actionInput && !actionInput.value) {
+            actionInput.value = "refresh";
+          }
+        });
+      })();
+    </script>
+  </body>
+  </html>
